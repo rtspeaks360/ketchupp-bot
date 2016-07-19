@@ -1,12 +1,14 @@
 import os
 import sys
 import json
+import ast
 
 import requests
 from flask import Flask, request
 
 ACCESS_TOKEN = "EAAELIKjsjMMBAGccJE5hLlpRisgwy0d2ZCwS3FljHnDpLzhXdcf5JSfQpktdOsLjWfi3ZBCdVWThg4ZC5L4CZAQ0b5VBvK9wVARyxlqi3morSWre4Ri8VVuCKL542Uu5qLHwaNaE018zJvONHIbM0zKmBD6STI40OoX5YeKm5QZDZD"
 VERIFY_TOKEN = "secret_key"
+API_URL = "http://52.220.0.228/production/v1.1/"
 
 app = Flask(__name__)
 
@@ -42,21 +44,22 @@ def webook():
             message_text = messaging_event["message"]["text"]  # the message's text
 
 
-          # if messaging_event["message"].__contains__('quick_reply'):
-          #   if messaging_event["message"]["quick_reply"]['payload'] == 'start_conversation':
-          #     print "start_conversation"
-          #     start_conversation(sender_id)
+          if messaging_event["message"].__contains__('quick_reply'):
+            if messaging_event["message"]["quick_reply"]['payload'] == 'start_conversation':
+              print "start_conversation"
+              start_conversation(sender_id)
 
-          #   if messaging_event["message"]["quick_reply"]['payload'] == 'end_conversation':
-          #     print "ending_conversation"
-          #     end_conversation(sender_id) 
-          # else:
-          #   send_message(sender_id)
+            if messaging_event["message"]["quick_reply"]['payload'] == 'end_conversation':
+              print "ending_conversation"
+              end_conversation(sender_id) 
+          else:
+            send_message(sender_id)
 
-            # pass
-          start_conversation(sender_id)
+          #   pass
+          # start_conversation(sender_id)
           # send_message(sender_id)
           # get_user_query(sender_id)
+          # get_daily_recomendations(sender_id)
 
         if messaging_event.get("delivery"):  # delivery confirmation
           pass
@@ -92,6 +95,104 @@ def get_daily_recomendations(recipient_id):
   headers = {
     "Content-Type": "application/json"
   }
+  data = get_data_for_dr(recipient_id)
+  # json.dumps({
+  #   "recipient" : {
+  #     "id": recipient_id
+  #   },
+  #   "message": {
+  #     "attachment": {
+  #       "type": "template",
+  #       "payload": {
+  #         "template_type": "generic",
+  #         "elements":  [#get_elements_for_dr()
+  #           {
+  #             "title": "Paneer Kathi Roll with Lacha Parantha : Rs 95",
+  #             "image_url": "http://d33oocx83zywzt.cloudfront.net/img400/10100406126.jpg",
+  #             "item_url": "http://www.ketchupp.in/gurgaon/DLF-Phase-1/dck-dana-chogas-kitchen-dlf-phase-1/Paneer-Kathi-Roll-with-Lacha-Parantha",
+  #             "subtitle": "paneer kathi roll served with lachha parantha",
+  #             "buttons": [
+  #               {
+  #                 "type" : "postback",
+  #                 "title" : "View Item",
+  #                 "payload": "get_item_details"
+  #               },
+  #               {
+  #                 "type" : "postback",
+  #                 "title": "Order Now",
+  #                 "payload": "order_item"
+  #               },
+  #               {
+  #                 "type": "web_url",
+  #                 "title": "View On ketchupp.",
+  #                 "url": "http://www.ketchupp.in/gurgaon/DLF-Phase-1/dck-dana-chogas-kitchen-dlf-phase-1/Paneer-Kathi-Roll-with-Lacha-Parantha"
+  #               } 
+  #             ]
+  #           }
+  #         ]
+  #       }
+  #     }
+  #   }
+  # })    
+
+  r = requests.post("https://graph.facebook.com/v2.6/me/messages", params=params, headers=headers, data=data)
+  print r
+  if r.status_code != 200:
+    print r.status_code
+    print r.text
+
+
+def get_element_for_card(card):
+  entry = {}
+
+  entry['title'] = card['dish_name']
+  entry["image_url"] = "http://d33oocx83zywzt.cloudfront.net/img400/" + card['image_url'] + ".jpg"
+  entry["item_url"] = "http://www.ketchupp.in/" + card["city_sf_name"] + "/" + card["location_sf_name"] + "/" + card["restaurant_sf_name"] + "/" + card["dish_sf_name"]
+  entry["subtitle"] = card["description"]
+  entry["buttons"] = [
+    {
+      "type" : "postback",
+      "title" : "View Item",
+      "payload" : "get_item_details"
+    },
+    {
+      "type" : "postback",
+      "title" : "Order Now",
+      "payload" : "order_item"
+    },
+    {
+      "type" : "web_url",
+      "title" : "View on ketchupp",
+      "url" : entry['item_url']
+    }
+  ]                
+
+  return entry
+
+
+def get_data_for_dr(recipient_id):
+  """This is the function which gets all the daily reccomendations from the home sections api."""
+  cards_with_quick_buy = []
+
+  url = API_URL + "home_sections"
+
+  data_dr_api = {
+    "sf_name" : "food-coupons-offers-deals"
+  }
+
+  response = requests.post(url, data = data_dr_api)
+  print response
+  data = json.loads(response.content)
+  product_cards = data['data'][0]['cards']
+  for card in product_cards:
+    if card['is_available_now'] == 1: #and card['is_quick_buy_enabled'] == 1:
+      cards_with_quick_buy.append(card)
+  
+  elements = []
+  
+  for card in cards_with_quick_buy:
+    elements.append(get_element_for_card(card))  
+  
   data = json.dumps({
     "recipient" : {
       "id": recipient_id
@@ -101,40 +202,17 @@ def get_daily_recomendations(recipient_id):
         "type": "template",
         "payload": {
           "template_type": "generic",
-          "elements": [
-            {
-              "title": "Paneer Kathi Roll with Lacha Parantha : Rs 95",
-              "image_url": "http://d33oocx83zywzt.cloudfront.net/img400/10100406126.jpg",
-              "subtitle": "paneer kathi roll served with lachha parantha",
-              "buttons": [
-                {
-                  "type" : "postback",
-                  "title" : "View Item",
-                  "payload": "get_item_details"
-                },
-                {
-                  "type" : "postback",
-                  "title": "Order Now",
-                  "payload": "order_item"
-                },
-                {
-                  "type": "web_url",
-                  "title": "View On ketchupp.",
-                  "url": "http://www.ketchupp.in/gurgaon/DLF-Phase-1/dck-dana-chogas-kitchen-dlf-phase-1/Paneer-Kathi-Roll-with-Lacha-Parantha"
-                } 
-              ]
-            }
-          ]
+          "elements": elements[0:5]
         }
       }
     }
   })    
 
-  r = requests.post("https://graph.facebook.com/v2.6/me/messages", params=params, headers=headers, data=data)
-  print r
-  if r.status_code != 200:
-    print r.status_code
-    print r.text
+  return data
+  # print data['data']['cards'][1]
+
+  # print response.json['data']['cards'][0]
+
 
 def get_user_query(recipient_id):
   params = {
@@ -287,13 +365,3 @@ def send_message(recipient_id):
 if __name__ == '__main__':
   app.debug = True
   app.run(host = '0.0.0.0', port = 5000)
-
-  # else:
-  #   data = json.dumps({
-  #     "recipient": {
-  #       "id": recipient_id
-  #     },
-  #     "message": {
-  #       "text": "Sorry, Couldn't get you!"
-  #     }
-  #   })
