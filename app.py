@@ -13,6 +13,7 @@ API_URL = "http://52.220.0.228/production/v1.1/"
 # Users = []
 i = 0
 user = {}
+user['id'] = "1162876460421056"
 user['name'] = ""
 user['mobile'] = ""
 user['email'] = ""
@@ -60,23 +61,25 @@ def webook():
 
 
           if messaging_event["message"].__contains__('quick_reply'):
-            if messaging_event["message"]["quick_reply"]['payload'] == 'start_conversation':
-              print "start_conversation"
-              start_conversation(sender_id)
+            if messaging_event["message"]["quick_reply"]["payload"] != None:  
+              if messaging_event["message"]["quick_reply"]['payload'] == 'start_conversation':
+                print "start_conversation"
+                start_conversation(sender_id)
 
-            if messaging_event["message"]["quick_reply"]['payload'] == 'end_conversation':
-              print "ending_conversation"
-              end_conversation(sender_id)
+              if messaging_event["message"]["quick_reply"]['payload'] == 'end_conversation':
+                print "ending_conversation"
+                end_conversation(sender_id)
 
-            if messaging_event["message"]["quick_reply"]["payload"] == "OrderItem":
-              print "Order Item"
+              if messaging_event["message"]["quick_reply"]["payload"].startswith("OrderItem"):
+                print "Order Item"
+                order(sender_id, messaging_event["message"]["quick_reply"]['payload'].split('_')[1])
 
-            if messaging_event["message"]["quick_reply"]["payload"] == 'Ohk':
-              send_text(sender_id, "Ohk")
-          else:
-            # send_text("599782550111468", "Hi")
-            # process_message(sender_id, message_text)
-            send_message(sender_id)
+              if messaging_event["message"]["quick_reply"]["payload"] == 'Ohk':
+                send_text(sender_id, "Ohk")
+          elif messaging_event["message"].__contains__("text") and (messaging_event["message"].__contains__("is_echo") != 1):
+            # send_text("1146167148778738", "Hi Abdul, Rishabh from ketchupp bot.")
+            process_message(sender_id, message_text)
+            # send_message(sender_id)
             # order(sender_id, '999999')
 
           # start_conversation(sender_id)
@@ -114,6 +117,7 @@ def webook():
 
           if messaging_event.get("postback")['payload'].startswith('OrderItem'):
             print messaging_event['postback']['payload']
+            order(sender_id, messaging_event['postback']['payload'].split('_')[1])
 
 
   return "ok", 200
@@ -121,28 +125,86 @@ def webook():
 
 def process_message(recipient_id, text):
   global expected_reply
-  
-  if expected_reply != '':
-    user[expected_reply] = text
-    print expected_reply
-    expected_reply = ''
+  global user
+
+  if expected_reply.endswith("name"):
+    print expected_reply 
+    user[expected_reply.split('_')[1]] = text
+    print user
+    
+    expected_reply = expected_reply.split('_')[0] + "_mobile"
+    get_data_from_user(recipient_id)
+    
+    return 0
     # print "processing "
     # send_text(recipient_id, "Your order would be placed as " + fname)
+
+  if expected_reply.endswith("mobile"):
+    user[expected_reply.split('_')[1]] = text
+    print expected_reply
+    print user
+    expected_reply = expected_reply.split('_')[0] + "_email"
+    get_data_from_user(recipient_id)
+    return 0
+
+  if expected_reply.endswith("email"):
+    user[expected_reply.split('_')[1]] = text
+    print expected_reply
+    print user
+    expected_reply = expected_reply.split('_')[0] + "_address"
+    get_data_from_user(recipient_id)
+    return 0
+
+  if expected_reply.endswith("address"):
+    user[expected_reply.split('_')[1]] = text
+    print expected_reply
+    print user
+    expected_reply = expected_reply.split('_')[0] + "_location"
+    get_data_from_user(recipient_id)
+    return 0
+
+  if expected_reply.endswith("location"):
+    user[expected_reply.split('_')[1]] = text
+    print expected_reply
+    print user
+    expected_reply = expected_reply.split('_')[0] + "_city"
+    get_data_from_user(recipient_id)
+    return 0
+
+  if expected_reply.endswith("city"):
+    user[expected_reply.split('_')[1]] = text
+    print expected_reply
+    print user
+    expected_reply = expected_reply.split('_')[0] + "_quantity"
+    get_data_from_user(recipient_id)
+    return 0
+
+  if expected_reply.endswith("quantity"):
+    user[expected_reply.split('_')[1]] = text
+    print expected_reply
+    print user
+    print "calling place order function"
+    place_order(recipient_id, expected_reply.split('_')[0])
+
+    expected_reply = ''
+    return 0
 
   else:
 
     print expected_reply
     print recipient_id
     print "first message"
-    get_name_from_user(recipient_id)
+    send_message(recipient_id)
+    # order(recipient_id, '101010087506')
+    return 0
 
 
-
-def get_data_from_user(recipient_id, intent):
+def get_data_from_user(recipient_id):
   global expected_reply
-  
-  expected_reply = intent.split("_")[1]
-  send_text(recipient_id, ("Enter your %s" % expected_reply))
+  # print intent
+  text = "Enter your %s" % expected_reply.split("_")[1]
+  send_text(recipient_id, text)
+
   # send_text(recipient_id, "Your name is " + fname)
 
 
@@ -169,14 +231,20 @@ def get_data_for_order(recipient_id, dish_id):
   # print response
 
 def order(recipient_id, dish_id):
-  pass
+  global expected_reply
+  expected_reply = ''
+  print "order process started"
+  expected_reply = str(dish_id) + "_name"
+  # print "intent :" + expected_reply
+  get_data_from_user(recipient_id)
 
 def place_order(recipient_id, dish_id):
   url = API_URL + "order"
   data = get_data_for_order(recipient_id, dish_id)
   response = requests.post(url, data = data)
-  print response
-  print response
+  print response.content
+  send_text(recipient_id, "Your order has been placed successfully!")
+  # print response
 
 def send_text(recipient_id, text):
   data = json.dumps({
@@ -303,7 +371,7 @@ def send_confirmation_message_item_detail_qb(recipient_id, dish_id, final_total)
         {
           "content_type" : "text",
           "title" : "Yes! Let's do it.",
-          "payload" : "OrderItem"#_" + dish_id
+          "payload" : "OrderItem_" + str(dish_id)
         },
         {
           "content_type" : "text",
@@ -627,6 +695,9 @@ def send_message_gen(recipient_id, data):
   global i
   i += 1
   print i
+
+# def set_start_settings():
+    
 
 if __name__ == '__main__':
   app.debug = True
