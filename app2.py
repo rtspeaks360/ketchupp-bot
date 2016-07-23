@@ -6,6 +6,7 @@ import ast
 import requests
 from flask import Flask, request
 
+page_recpient_id = 1162876460421056
 ACCESS_TOKEN = "EAAELIKjsjMMBAGccJE5hLlpRisgwy0d2ZCwS3FljHnDpLzhXdcf5JSfQpktdOsLjWfi3ZBCdVWThg4ZC5L4CZAQ0b5VBvK9wVARyxlqi3morSWre4Ri8VVuCKL542Uu5qLHwaNaE018zJvONHIbM0zKmBD6STI40OoX5YeKm5QZDZD"
 VERIFY_TOKEN = "secret_key"
 API_URL = "http://52.220.0.228/production/v1.1/"
@@ -40,15 +41,18 @@ def webhook():
           print "message recieved"
           sender_id = messaging_event["sender"]["id"]        # the facebook ID of the person sending you the message
           recipient_id = messaging_event["recipient"]["id"]  # the recipient's ID, which should be your page's facebook ID
-          if messaging_event["message"].__contains__("text"):
-            message_text = messaging_event["message"]["text"]  # the message's text
+          if recipient_id != page_recpient_id:
+            if messaging_event["message"].__contains__("text"):
+              message_text = messaging_event["message"]["text"]  # the message's text
 
-          if messaging_event["message"].__contains__("quick_reply"):
-            pass
-          else:
-            start_conversation(sender_id)
-          # start_settings()
-          # send_text("1030094417086995", " too!")
+              if messaging_event["message"].__contains__("quick_reply"):
+                pass
+              else:
+                # send_text(recipient_id, get_name(recipient_id))
+                # start_conversation(sender_id)
+                process_message(sender_id, message_text)
+              # start_settings()
+              # send_text("1030094417086995", " too!")
 
         if messaging_event.get("delivery"):  # delivery confirmation
           pass
@@ -67,19 +71,37 @@ def webhook():
           recipient_id = messaging_event["recipient"]["id"]  # the recipient's ID, which should be your page's facebook ID
           
           if messaging_event["postback"]["payload"] == "IAmHungry" : 
-            pass
+            i_am_hungry(sender_id)
           if messaging_event["postback"]["payload"] == "DailyRecommendations" : 
             get_daily_recomendations(sender_id)
           if messaging_event["postback"]["payload"] == "FoodNews":
             pass
+          if messaging_event["postback"]["payload"] == "Search":
+            start_search_process(sender_id)
           if messaging_event["postback"]["payload"].startswith("ItemDetails"):
             get_item_details(sender_id, messaging_event["postback"]["payload"])
           if messaging_event["postback"]["payload"] == 'Ohk':
             send_text(sender_id, "Ohk!")
 
+
   return "ok", 200
 
-
+def process_message(recipient_id, message_text):
+  """This function processes the recieved text message and makes a call to the specific function according to the reply from the user and intent from the database."""
+  try:
+    intent = get_intent(recipient_id)
+    if intent == "search_query":
+      search_dish(recipient_id, message_text)
+      return 0
+    if intent == "del_location":
+      update_botinfo(recipient_id, "del_location", message_text)
+      start_search_process(recipient_id)
+      return 0
+    else :
+      start_conversation(recipient_id)
+      return 0
+  except AttributeError:
+    start_conversation(recipient_id)
 
 def get_data_from_payload_itemdetails(payload):
   """This function extracts the parameters for Item details request from the payload and returns a dictionary with required data to make a request to Ketchupp deals api."""
@@ -290,7 +312,7 @@ def get_data_for_dr(recipient_id):
     for card in cards_with_quick_buy:
       elements.append(get_element_for_card(card))  
     
-    # elements.append(get_element_for_card(product_cards[0]['cards'][0]))
+    elements.append(get_element_for_card(product_cards[0]['cards'][0]))
     if len(elements) != 0:
       data = json.dumps({
         "recipient" : {
@@ -345,11 +367,135 @@ def get_daily_recomendations(recipient_id):
     print r.status_code
     print r.text
 
-# def i_am_hungry(recipient_id):
+def get_data_for_search_results(recipient_id, dish_name):
+  """This function sends the data for search result message to the user."""
 
+  user_data = get_user_data_db(recipient_id)
+
+  url = API_URL + "dish_search_clicked"
+
+  data_dsc_api = {
+    "meal_time" : 'all',
+    "veg_nonveg_ind" : "undefined",
+    "city_name" : 'gurgaon',
+    'del_loc_sf_name' : "sushant-lok-1",
+    'sort_buy' : '0',
+    'quick_buy' : '0',
+    'restaurants' : '',
+    'lower_price_limit' : '0',
+    'upper_price_limit' : '500',
+    'dish_name' : dish_name,
+    'cuisine_name' : '',
+    'is_available_now' : '0'
+  }
+
+  search_result_request = requests.post(url, data = data)
+
+  product_cards = json.loads(search_result_request.content)['data']['cards']
+  elements = []
+  cards_with_quick_buy = []
+  
+  for card in product_cards:
+    if card['is_available_now'] == 1 and card['is_quick_buy_enabled'] == 1:
+      cards_with_quick_buy.append(card)
+
+  for card in cards_with_quick_buy:
+    elements.append(get_element_for_card(card))    
+
+  data = json.dumps({
+    "recipient" : {
+      "id": recipient_id
+    },
+    "message": {
+      "attachment": {
+        "type": "template",
+        "payload": {
+          "template_type": "generic",
+          "elements": elements[0:5]
+        }
+      }
+    }
+  })
+
+  return data
+
+def search_dish(recipient_id, query):
+  """This function sends user the resulting dishes from his her search."""
+
+  url = API_URL + "search_bar"
+  user_data = get_user_data_db(recipient_id)
+  data = {
+    'q' : query,
+    'city_name' : "gurgaon",
+    'type' : 'dishcuisine',
+    'del_loc_sf_name' : user_data['del_location']
+  }
+  r = requests.post(url, data = data)
+  r = json.loads(r.content)['data']
+  print r
+  if len(r) == 0:
+    send_text(recipient_id, "Sorry, I couldn't find any thing with that name. Why don't you try something else!")
+    set_intent(recipient_id, "")
+  else:
+    for t in r:
+      if t['type'] == 'tag' or t['type'] == 'dish':
+        data = get_data_for_search_results(recipient_id, t['name'])
+        break
+    send_message_gen(recipient_id, data)
+
+def start_search_process(recipient_id):
+  """This function is called whenever a user clicks on search dish cuisine button. This function starts the search process."""
+  # data = get_user_data_db(recipient_id)
+  # if data["del_location"] == None:
+    # get_data_from_user(recipient_id, "Before we begin, I need to know your exact location so that i can show you more refined results", "del_location")
+
+  get_data_from_user(recipient_id, "So, what is it it that you would like to have today.", "search_query")
+
+def i_am_hungry(recipient_id):
+  """This function is used to continue conversation when user chooses i am hungry option in the starting of conversion."""
+  data = json.dumps({
+    "recipient" : {
+      "id" : recipient_id
+    },
+    "message" : {
+      "attachment" : {
+        "type" : "template",
+        "payload" : {
+          "template_type" : "button",
+          "text" : "Ohk! Well, I'm always here to serve your hunger!",
+          "buttons" : [
+            {
+              "type" : "postback",
+              "title" : "Search dish/cuisine",
+              "payload" : "Search"
+            },
+            {
+              "type" : "postback",
+              "title" : "No, not hungry!",
+              "payload" : "StartFacts"
+            },
+            {
+              "type" : "postback",
+              "title" : "What others are having!",
+              "payload" : "DailyRecommendations"
+            }
+          ]
+        }
+      }
+    }
+  })
+
+  send_message_gen(recipient_id, data)
 
 def start_conversation(recipient_id):
-  """This is the function which begins the conservation with user ffrom scratch."""
+  """This is the function which begins the conservation with user from scratch."""
+
+  user = get_user_data_db(recipient_id)
+
+  if user == "User Not Found!":
+    add_user_db(recipient_id)  
+    user = get_user_data_db(recipient_id)
+  print user
 
   data = json.dumps({
     "recipient" : {
@@ -385,7 +531,15 @@ def start_conversation(recipient_id):
 
   send_message_gen(recipient_id, data)
 
+def get_data_from_user(recipient_id, question, intent):
+  """This function sends user a quesrtion and updates the intent field according to the question."""
+  set_intent(recipient_id ,intent)
+  print get_intent(recipient_id)
+  send_text(recipient_id, question)
+
 def send_text(recipient_id, text):
+  "This function takes user's recipient id and text as arguments and sends a text to the user."
+
   data = json.dumps({
     "recipient" : {
       "id" : recipient_id
@@ -413,7 +567,79 @@ def send_message_gen(recipient_id, data):
     print r.status_code
     print r.text
 
+def get_intent(recipient_id):
+  """This function sends the set intent fetched from the database and returns string 'empty' if it is empty."""
+  
+  r = get_user_data_db(recipient_id)
+  if r != 'User Not Found!':
+    print r
+    user_data = r
+    if user_data['intent'] == None:
+      return user_data['intent']
+    else:
+      return "empty"
+
+def set_intent(recipient_id, intent):
+  """This function takes intent as parameter and updates the intent field in db to facilitiate user communication."""
+  
+  update_user_data_db(recipient_id, "intent", intent)
+
+def get_user_data_db(recipient_id):
+  """This function gets current user data from the database."""
+
+  url = API_URL + "get_botinfo"
+  data = {
+    "recp_id" : recipient_id
+  }
+  r = requests.post(url, data=data)
+  if r.status_code == 200:
+    user_data = json.loads(r.content)["data"]
+    return user_data
+  else :
+    return "User Not Found!"
+
+def update_user_data_db(recipient_id, key, value):
+  """This function takes in user recipient id, key and value and updates the value of specific key given to the function in parameters."""
+
+  entry = {}
+  entry[key] = value
+  entry["recp_id"] = recipient_id
+
+  url = API_URL + "update_botinfo"
+  
+  r = requests.post(url, data = entry)
+
+def get_name(recipient_id):
+  """This function takes recipientr_id as argument and returns the name of the user."""
+  if recipient_id != page_recpient_id:
+    url = "https://graph.facebook.com/v2.6/" + recipient_id + "?fields=first_name&access_token=" + ACCESS_TOKEN
+    user_info = requests.get(url)
+    print recipient_id
+    print user_info.content
+    # print user_info.content
+    # print json.loads(user_info.content)['first_name']
+    name = json.loads(user_info.content)['first_name']
+    print name
+    return name
+  else:
+    return "page"
+
+def add_user_db(recipient_id):
+  """This function takes in user recipient id and adds the user in  database"""
+
+  entry = {}
+  entry["recp_id"] = recipient_id
+  # entry["name"] = get_name(recipient_id)
+
+  url = API_URL + "insert_botinfo"
+  r = requests.post(url, data = entry)
+  print r.content
+  print "new user added"
+  # update_user_data_db(recipient_id, 'city', 'Gurgaon')
+
 def start_settings():
+  """This function was used once to set the get started button and the greeting text."""
+
   params = {
     "access_token" : ACCESS_TOKEN
   }
